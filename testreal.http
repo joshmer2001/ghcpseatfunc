@@ -1,0 +1,7 @@
+GET http://api.github.com/orgs/hackathon-black-beaver-85/copilot/billing/seats
+Content-Type: application/json
+Authorization: Bearer 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
+X-GitHub-Api-Version: 2022-11-28
+
+{
+}

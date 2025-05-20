@@ -57,6 +57,13 @@ namespace ghcpfunc
                 // Read environment variables 
                 string key = Environment.GetEnvironmentVariable("GITHUB_API_KEY") ?? string.Empty;
                 string org = Environment.GetEnvironmentVariable("org") ?? string.Empty;
+                string clientId = Environment.GetEnvironmentVariable("clientId") ?? string.Empty;
+                string tenantId = Environment.GetEnvironmentVariable("tenantId") ?? string.Empty;
+                string clientSecret = Environment.GetEnvironmentVariable("clientSecret") ?? string.Empty;
+                string groupId = Environment.GetEnvironmentVariable("groupId") ?? string.Empty;
+                string sendGridAPIKey = Environment.GetEnvironmentVariable("sendGridAPIKey") ?? string.Empty;
+                string emailSender = Environment.GetEnvironmentVariable("emailSender") ?? string.Empty;
+
                 double daysRemove = 45; // Match case with .env file
                 double daysWarning = 30;
                 string employeeid = "10101010"; //used for testing 
@@ -119,9 +126,6 @@ namespace ghcpfunc
                 var scopes = new[] { "https://graph.microsoft.com/.default" };
 
                 // Values from app registration
-                var clientId = "5551af79-b8d6-4599-b8bd-3ac42ef1f7ef";
-                var tenantId = "772a1fc5-157e-4e16-aece-08086727f29d";
-                var clientSecret = "2UN8Q~mIwyqHYm4tSP56zs~u9C-dHtnAMACAba0o";
 
                 var options = new ClientSecretCredentialOptions
                 {
@@ -156,8 +160,8 @@ namespace ghcpfunc
                         var userId = entraUser.Value.FirstOrDefault()?.Id;
                         if (userId != null)
                         {
-                            await graphClient.Groups["17f6e812-6345-4e7a-8e80-5a29796c9ed5"].Members[userId].Ref.DeleteAsync();
-                            _logger.LogInformation($"Removed user {user.Username} from group 17f6e812-6345-4e7a-8e80-5a29796c9ed5");
+                            await graphClient.Groups[groupId].Members[userId].Ref.DeleteAsync();
+                            _logger.LogInformation($"Removed user {user.Username} from group {groupId}");
                         }
                         if (entraUser == null || entraUser.Value == null || !entraUser.Value.Any())
                         {
@@ -174,7 +178,6 @@ namespace ghcpfunc
 
 
                 }
-                // var userId = "906bf302-c55f-49a0-ad11-d1b45c718e07";
 
 
                 // SEND WARNING EMAILS
@@ -206,9 +209,8 @@ namespace ghcpfunc
 
                         // USING SENDGRID TO SEND EMAIL
 
-                        var apiKey = "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";
-                        var client = new SendGridClient(apiKey);
-                        var from = new SendGrid.Helpers.Mail.EmailAddress("joshmer@hotmail.co.uk", "Josh");
+                        var client = new SendGridClient(sendGridAPIKey);
+                        var from = new SendGrid.Helpers.Mail.EmailAddress(emailSender, "");
                         var subject = "GitHub Copilot Inactivity Warning - Action Required";
                         var to = new SendGrid.Helpers.Mail.EmailAddress(entraUser.Value.FirstOrDefault()?.Mail, entraUser.Value.FirstOrDefault()?.DisplayName);
                         var plainTextContent = $"Dear {entraUser.Value.FirstOrDefault()?.DisplayName},\n\n" +
@@ -250,14 +252,14 @@ namespace ghcpfunc
                         //             // {
                         //             //     EmailAddress = new EmailAddress
                         //             //     {
-                        //             //         Address = "joshmer_hotmail.co.uk#EXT#@joshmerhotmailco.onmicrosoft.com", 
+                        //             //         Address = "email_insert", 
                         //             //     },
                         //             // },
                         //         },
                         //         SaveToSentItems = false,
                         //     };
 
-                        //     await graphClient.Users["joshmer_hotmail.co.uk#EXT#@joshmerhotmailco.onmicrosoft.com"].SendMail.PostAsync(new Microsoft.Graph.Users.Item.SendMail.SendMailPostRequestBody
+                        //     await graphClient.Users["email_insert"].SendMail.PostAsync(new Microsoft.Graph.Users.Item.SendMail.SendMailPostRequestBody
                         //     {
                         //         Message = requestBodyMail.Message,
                         //         SaveToSentItems = requestBodyMail.SaveToSentItems

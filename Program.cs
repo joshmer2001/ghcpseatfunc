@@ -5,6 +5,7 @@ using ghcpfunc;
 using System.Net.Http.Headers;
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
+using DotNetEnv;
 
 var builder = FunctionsApplication.CreateBuilder(args);
 
@@ -20,7 +21,7 @@ var host = builder.Build();
 
 // Retrieve values from environment variables
 // string key = Environment.GetEnvironmentVariable("GITHUB_API_KEY") ?? string.Empty;
-// string org = Environment.GetEnvironmentVariable("org") ?? string.Empty; // Match case with .env file
+// string enterprise = Environment.GetEnvironmentVariable("enterprise") ?? string.Empty; // Match case with .env file
 // double days = double.TryParse(Environment.GetEnvironmentVariable("days"), out var parsedDays) ? parsedDays : 30; // Match case with .env file
 
 
@@ -31,7 +32,7 @@ builder.Build().Run();
 
 public static class GitHubHelper
 {
-    public static async Task<(List<(string Username, DateTime LastActivity, string externalId)> InactiveUsers, List<(string Username, DateTime LastActivity, string externalId)> WarnUsers)> GetInactiveUsers(string key, string org, double daysRemove, double daysWarn, ILogger logger)
+    public static async Task<(List<(string Username, DateTime LastActivity, string externalId)> InactiveUsers, List<(string Username, DateTime LastActivity, string externalId)> WarnUsers)> GetInactiveUsers(string key, string enterprise, double daysRemove, double daysWarn, ILogger logger)
     {
         List<(string Username, DateTime LastActivity, string externalId)> inactiveUserList = new List<(string Username, DateTime LastActivity, string externalId)>();
         List<(string Username, DateTime LastActivity, string externalId)> warnUserList = new List<(string Username, DateTime LastActivity, string externalId)>();
@@ -41,7 +42,7 @@ public static class GitHubHelper
         httpClient.DefaultRequestHeaders.Add("X-GitHub-Api-Version", "2022-11-28");
         httpClient.DefaultRequestHeaders.Add("User-Agent", "ghcpfunc"); // Added User-Agent header
 
-        var url = $"https://api.github.com/orgs/{org}/copilot/billing/seats"; // Changed to HTTPS
+        var url = $"https://api.github.com/enterprises/{enterprise}/copilot/billing/seats"; // Changed to HTTPS
         logger.LogInformation("Sending request to GitHub API: {Url}", url);
 
         var response = await httpClient.GetAsync(url);

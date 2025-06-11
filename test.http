@@ -1,4 +1,4 @@
-GET http://localhost:7071/api/ghcpfunc
+GET https://ghcpfunc.azurewebsites.net/api/ghcpfunc
 Content-Type: application/json
 
 {

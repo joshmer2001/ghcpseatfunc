@@ -56,7 +56,7 @@ namespace ghcpfunc
             {
                 // Read environment variables 
                 string key = Environment.GetEnvironmentVariable("GITHUB_API_KEY") ?? string.Empty;
-                string org = Environment.GetEnvironmentVariable("org") ?? string.Empty;
+                string enterprise = Environment.GetEnvironmentVariable("enterprise") ?? string.Empty;
                 string clientId = Environment.GetEnvironmentVariable("clientId") ?? string.Empty;
                 string tenantId = Environment.GetEnvironmentVariable("tenantId") ?? string.Empty;
                 string clientSecret = Environment.GetEnvironmentVariable("clientSecret") ?? string.Empty;
@@ -74,7 +74,7 @@ namespace ghcpfunc
                 //     ? $"{key.Substring(0, 5)}...{key.Substring(key.Length - 5)}" 
                 //     : "(empty)";
 
-                // _logger.LogInformation($"Environment variables: API Key: {maskedKey}, org: {org}, days: {daysRemove}");
+                // _logger.LogInformation($"Environment variables: API Key: {maskedKey}, enterprise: {enterprise}, days: {daysRemove}");
 
                 if (string.IsNullOrEmpty(key))
                 {
@@ -82,13 +82,13 @@ namespace ghcpfunc
                     return new BadRequestObjectResult("GitHub API Key is required");
                 }
 
-                if (string.IsNullOrEmpty(org))
+                if (string.IsNullOrEmpty(enterprise))
                 {
-                    _logger.LogError("GitHub organization name is missing.");
-                    return new BadRequestObjectResult("GitHub organization name is required");
+                    _logger.LogError("GitHub enterprise name is missing.");
+                    return new BadRequestObjectResult("GitHub enterpise name is required");
                 }
 
-                var (inactiveUsers, warnUsers) = await GitHubHelper.GetInactiveUsers(key, org, daysRemove, daysWarning, _logger);
+                var (inactiveUsers, warnUsers) = await GitHubHelper.GetInactiveUsers(key, enterprise, daysRemove, daysWarning, _logger);
 
                 //ADDING FAKE USER INFO FOR TESTING
                 inactiveUsers.Add((username, DateTime.UtcNow, employeeid));

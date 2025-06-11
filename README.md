@@ -31,6 +31,7 @@ This codebase is a proof-of-concept (POC) tool designed to automate the deprovis
   - If inactivity continues for **45 days**, the user receives a final email and is automatically removed from the Azure Entra group that grants the Copilot license.
 - **License Assignment:**
   - Users in the specific Azure Entra group are automatically assigned a Copilot license. Removal from the group revokes the license, and this occurs once 45 days of inactivity is reached.
+  - The function will then check each user's Entra properties within the SCIM GitHub Enterpise group, checking if the fields userPrincipalName starts with the GitHub Username, mailNickname starts with the GitHub Username, or employeeId starts with the GitHub External Id
 - **Email Notifications:**
   - By default, emails are sent using [SendGrid](https://sendgrid.com/).
   - Optionally, you can use the Microsoft Graph API to send emails if your tenant has the required M365/Exchange Online licenses (see sample code in the repo).

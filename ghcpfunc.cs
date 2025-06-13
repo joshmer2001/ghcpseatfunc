@@ -13,7 +13,8 @@ using Microsoft.Graph.Models;
 using SendGrid;
 using SendGrid.Helpers.Mail;
 using DotNetEnv;
-
+using Azure.Data.Tables;
+using ghcpfunc.Models;
 
 namespace ghcpfunc
 {
@@ -22,36 +23,40 @@ namespace ghcpfunc
     {
         
         private readonly ILogger<ghcpfunc> _logger;
+        private TableClient _warnTableClient;
+        private TableClient _inactiveTableClient;
 
         public ghcpfunc(ILogger<ghcpfunc> logger)
         {
             _logger = logger;
 
-            // try 
-            // {
-            //     // Check if .env file exists before loading
-            //     string envPath = Path.Combine(Directory.GetCurrentDirectory(), ".env");
-            //     if (File.Exists(envPath))
-            //     {
-            //         _logger.LogInformation($".env file found at: {envPath}");
-            //         DotNetEnv.Env.Load(envPath);
-            //     }
-            //     else
-            //     {
-            //         _logger.LogWarning($".env file not found at: {envPath}");
-            //     }
-            // }
-            // catch (Exception ex)
-            // {
-            //     _logger.LogError($"Error loading .env file: {ex.Message}");
-            // }
+        }
+        private async Task ClearAndWriteTableAsync(TableClient tableClient, string partitionKey, List<(string Username, DateTime LastActivity, string externalId)> users)
+        {
+            await foreach (var entity in tableClient.QueryAsync<UserEntity>(e => e.PartitionKey == partitionKey))
+            {
+                await tableClient.DeleteEntityAsync(entity.PartitionKey, entity.RowKey);
+            }
+
+            foreach (var user in users)
+            {
+                await tableClient.AddEntityAsync(new UserEntity
+                {
+                    PartitionKey = partitionKey,
+                    RowKey = user.externalId,
+                    LastActivity = user.LastActivity,
+                    Username = user.Username
+                });
+            }
         }
 
         [Function("ghcpfunc")]
         public async Task<IActionResult> Run([HttpTrigger(AuthorizationLevel.Anonymous, "get")] HttpRequest req)
+        //public async Task Run([TimerTrigger("0 0 9 * * *")] TimerInfo timerInfo)
         {
             _logger.LogInformation("C# HTTP trigger function processed a request.");
             Env.Load();
+        
             try
             {
                 // Read environment variables 
@@ -63,18 +68,16 @@ namespace ghcpfunc
                 string groupId = Environment.GetEnvironmentVariable("groupId") ?? string.Empty;
                 string sendGridAPIKey = Environment.GetEnvironmentVariable("sendGridAPIKey") ?? string.Empty;
                 string emailSender = Environment.GetEnvironmentVariable("emailSender") ?? string.Empty;
+                string storageConn = Environment.GetEnvironmentVariable("AzureWebJobsStorage") ?? string.Empty;
 
-                double daysRemove = 45; // Match case with .env file
+                _warnTableClient = new TableClient(storageConn, "WarnUsers");
+                _inactiveTableClient = new TableClient(storageConn, "InactiveUsers");
+                _warnTableClient.CreateIfNotExists();
+                _inactiveTableClient.CreateIfNotExists();
+
+                double daysRemove = 45; 
                 double daysWarning = 30;
-                string employeeid = "10101010"; //used for testing 
-                string username = "seat1"; //used for testing
 
-                // Log environment variable values (mask the API key for security)
-                // string maskedKey = !string.IsNullOrEmpty(key) && key.Length > 10 
-                //     ? $"{key.Substring(0, 5)}...{key.Substring(key.Length - 5)}" 
-                //     : "(empty)";
-
-                // _logger.LogInformation($"Environment variables: API Key: {maskedKey}, enterprise: {enterprise}, days: {daysRemove}");
 
                 if (string.IsNullOrEmpty(key))
                 {
@@ -89,10 +92,6 @@ namespace ghcpfunc
                 }
 
                 var (inactiveUsers, warnUsers) = await GitHubHelper.GetInactiveUsers(key, enterprise, daysRemove, daysWarning, _logger);
-
-                //ADDING FAKE USER INFO FOR TESTING
-                inactiveUsers.Add((username, DateTime.UtcNow, employeeid));
-                warnUsers.Add((username, DateTime.UtcNow, employeeid));
 
                 List<(string Username, DateTime LastActivity, string externalId)> inactiveUserList = inactiveUsers;
                 List<(string Username, DateTime LastActivity, string externalId)> warnUserList = warnUsers;
@@ -148,7 +147,7 @@ namespace ghcpfunc
                         var entraUser = await graphClient.Users.GetAsync((requestConfiguration) =>
                         {
                             requestConfiguration.QueryParameters.Filter =
-                                $"startswith(userPrincipalName,'{user.Username}') or startswith(mailNickname,'{user.Username}') or startswith(employeeId,'{user.externalId}')"; //NEED TO USE EXTERNALID
+                                $"startswith(userPrincipalName,'{user.Username}') or startswith(mailNickname,'{user.Username}') or startswith(employeeId,'{user.externalId}')";
                             requestConfiguration.QueryParameters.Select = new string[]
                             {
                                 "id", "displayName", "userPrincipalName", "mail", "mailNickname", "identities"
@@ -183,97 +182,108 @@ namespace ghcpfunc
                 // SEND WARNING EMAILS
                 foreach (var user in warnUserList)
                 {
-
-                    //FIND USER IN ENTRA
-
-                    try
+                    var exists = await _warnTableClient.GetEntityIfExistsAsync<UserEntity>("WarnUser", user.externalId); //CHECKING ROWKEY == EXTERNAL ID
+                    if (!exists.HasValue)
                     {
-                        var entraUser = await graphClient.Users.GetAsync((requestConfiguration) =>
+                        try
                         {
-                            requestConfiguration.QueryParameters.Filter =
-                                $"startswith(userPrincipalName,'{user.Username}') or startswith(mailNickname,'{user.Username}') or startswith(employeeId,'{user.externalId}')"; //NEED TO USE EXTERNALID
-                            requestConfiguration.QueryParameters.Select = new string[]
+                            var entraUser = await graphClient.Users.GetAsync((requestConfiguration) =>
                             {
-                                "id", "displayName", "userPrincipalName", "mail", "mailNickname", "identities"
-                            };
-                            requestConfiguration.QueryParameters.Top = 1;
-                        });
+                                requestConfiguration.QueryParameters.Filter =
+                                    $"startswith(userPrincipalName,'{user.Username}') or startswith(mailNickname,'{user.Username}') or startswith(employeeId,'{user.externalId}')"; 
+                                requestConfiguration.QueryParameters.Select = new string[]
+                                {
+                                    "id", "displayName", "userPrincipalName", "mail", "mailNickname", "identities"
+                                };
+                                requestConfiguration.QueryParameters.Top = 1;
+                            });
 
 
-                        if (entraUser == null || entraUser.Value == null || !entraUser.Value.Any())
-                        {
-                            _logger.LogWarning($"No matching Entra user found for username: {user.Username}, externalId: {user.externalId}");
-                            return new NotFoundObjectResult($"No matching Entra user found for username: {user.Username}, externalId: {user.externalId}");
+                            if (entraUser == null || entraUser.Value == null || !entraUser.Value.Any())
+                            {
+                                _logger.LogWarning($"No matching Entra user found for username: {user.Username}, externalId: {user.externalId}");
+                                return new NotFoundObjectResult($"No matching Entra user found for username: {user.Username}, externalId: {user.externalId}");
+                            }
+                            _logger.LogInformation($"Found Entra user: {entraUser.Value.FirstOrDefault()?.DisplayName} with email: {entraUser.Value.FirstOrDefault()?.Mail}");
+
+                            // USING SENDGRID TO SEND EMAIL
+
+                            var client = new SendGridClient(sendGridAPIKey);
+                            var from = new SendGrid.Helpers.Mail.EmailAddress(emailSender, "");
+                            var subject = "GitHub Copilot Inactivity Warning - Action Required";
+                            var to = new SendGrid.Helpers.Mail.EmailAddress(entraUser.Value.FirstOrDefault()?.Mail, entraUser.Value.FirstOrDefault()?.DisplayName);
+                            var plainTextContent = $"Dear {entraUser.Value.FirstOrDefault()?.DisplayName},\n\n" +
+                                                "We have noticed that you have not been active on GitHub Copilot for a while. " +
+                                                "Please log in to your account and use the service to avoid being removed from the group.\n\n" +
+                                                "Best regards,\n" +
+                                            "Your Team";
+                            var htmlContent = "";
+                            var msg = MailHelper.CreateSingleEmail(from, to, subject, plainTextContent, htmlContent);
+                            var response = await client.SendEmailAsync(msg).ConfigureAwait(false);
+
+
+                            // USING GRAPH API TO SEND EMAIL (REQUIRES EXCHANGE LISENCE)    
+                            //     var requestBodyMail = new SendMailPostRequestBody
+                            //     {
+                            //         Message = new Message
+                            //         {
+                            //             Subject = "GitHub Copilot Inactivity Warning - Action Required",
+                            //             Body = new ItemBody
+                            //             {
+                            //                 ContentType = BodyType.Text,
+                            //                 Content = $"Dear {entraUser.Value.FirstOrDefault()?.DisplayName},\n\n" +
+                            //                         "We have noticed that you have not been active on GitHub Copilot for a while. " +
+                            //                         "Please log in to your account and use the service to avoid being removed from the group.\n\n" +
+                            //                         "Best regards,\n" +
+                            //                         "Your Team",
+                            //             },
+                            //             ToRecipients = new List<Recipient>
+                            //             {
+                            //                 new Recipient
+                            //                 {
+                            //                     EmailAddress = new EmailAddress
+                            //                     {
+                            //                         Address = entraUser.Value.FirstOrDefault()?.Mail,
+                            //                     },
+                            //                 },
+                            //             },
+                            //             // From = new Recipient
+                            //             // {
+                            //             //     EmailAddress = new EmailAddress
+                            //             //     {
+                            //             //         Address = "email_insert", 
+                            //             //     },
+                            //             // },
+                            //         },
+                            //         SaveToSentItems = false,
+                            //     };
+
+                            //     await graphClient.Users["email_insert"].SendMail.PostAsync(new Microsoft.Graph.Users.Item.SendMail.SendMailPostRequestBody
+                            //     {
+                            //         Message = requestBodyMail.Message,
+                            //         SaveToSentItems = requestBodyMail.SaveToSentItems
+                            //     });
+                            //     _logger.LogInformation($"Warning email sent to user: {user.Username}");
+                            //     await graphClient.Me.SendMail.PostAsync(requestBodyMail);
                         }
-                        _logger.LogInformation($"Found Entra user: {entraUser.Value.FirstOrDefault()?.DisplayName} with email: {entraUser.Value.FirstOrDefault()?.Mail}");
+                        catch (Exception ex)
+                        {
+                            _logger.LogError($"Error occurred while processing warning email for username: {user.Username}, externalId: {user.externalId}. Exception: {ex.Message}");
+                            continue;
+                        }
 
-                        // USING SENDGRID TO SEND EMAIL
-
-                        var client = new SendGridClient(sendGridAPIKey);
-                        var from = new SendGrid.Helpers.Mail.EmailAddress(emailSender, "");
-                        var subject = "GitHub Copilot Inactivity Warning - Action Required";
-                        var to = new SendGrid.Helpers.Mail.EmailAddress(entraUser.Value.FirstOrDefault()?.Mail, entraUser.Value.FirstOrDefault()?.DisplayName);
-                        var plainTextContent = $"Dear {entraUser.Value.FirstOrDefault()?.DisplayName},\n\n" +
-                                             "We have noticed that you have not been active on GitHub Copilot for a while. " +
-                                             "Please log in to your account and use the service to avoid being removed from the group.\n\n" +
-                                             "Best regards,\n" +
-                                           "Your Team";
-                        var htmlContent = "";
-                        var msg = MailHelper.CreateSingleEmail(from, to, subject, plainTextContent, htmlContent);
-                        var response = await client.SendEmailAsync(msg).ConfigureAwait(false);
-
-
-                        // USING GRAPH API TO SEND EMAIL (REQUIRES EXCHANGE LISENCE)    
-                        //     var requestBodyMail = new SendMailPostRequestBody
-                        //     {
-                        //         Message = new Message
-                        //         {
-                        //             Subject = "GitHub Copilot Inactivity Warning - Action Required",
-                        //             Body = new ItemBody
-                        //             {
-                        //                 ContentType = BodyType.Text,
-                        //                 Content = $"Dear {entraUser.Value.FirstOrDefault()?.DisplayName},\n\n" +
-                        //                         "We have noticed that you have not been active on GitHub Copilot for a while. " +
-                        //                         "Please log in to your account and use the service to avoid being removed from the group.\n\n" +
-                        //                         "Best regards,\n" +
-                        //                         "Your Team",
-                        //             },
-                        //             ToRecipients = new List<Recipient>
-                        //             {
-                        //                 new Recipient
-                        //                 {
-                        //                     EmailAddress = new EmailAddress
-                        //                     {
-                        //                         Address = entraUser.Value.FirstOrDefault()?.Mail,
-                        //                     },
-                        //                 },
-                        //             },
-                        //             // From = new Recipient
-                        //             // {
-                        //             //     EmailAddress = new EmailAddress
-                        //             //     {
-                        //             //         Address = "email_insert", 
-                        //             //     },
-                        //             // },
-                        //         },
-                        //         SaveToSentItems = false,
-                        //     };
-
-                        //     await graphClient.Users["email_insert"].SendMail.PostAsync(new Microsoft.Graph.Users.Item.SendMail.SendMailPostRequestBody
-                        //     {
-                        //         Message = requestBodyMail.Message,
-                        //         SaveToSentItems = requestBodyMail.SaveToSentItems
-                        //     });
-                        //     _logger.LogInformation($"Warning email sent to user: {user.Username}");
-                        //     await graphClient.Me.SendMail.PostAsync(requestBodyMail);
                     }
-                    catch (Exception ex)
+
+                    else
                     {
-                        _logger.LogError($"Error occurred while processing warning email for username: {user.Username}, externalId: {user.externalId}. Exception: {ex.Message}");
-                        continue;
+                        _logger.LogInformation($"Warning email already sent to {user.Username}, skipping.");
                     }
 
+                    await ClearAndWriteTableAsync(_warnTableClient, "WarnUser", warnUsers);
+                    await ClearAndWriteTableAsync(_inactiveTableClient, "InactiveUser", inactiveUsers);
                 }
+
+
 
 
                 var result = new
